@@ -1,71 +1,91 @@
 import boto3
 import csv
-import logging
-import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-# Professional Logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger("EnterpriseAuditor")
+# IAM client initialize
+iam = boto3.client('iam')
 
-class EnterpriseIAMEngine:
-    def __init__(self):
-        self.iam = boto3.client('iam')
-        self.report_path = "reports/enterprise_security_audit.csv"
+def audit_users():
+    report_data = []
+    today = datetime.now(timezone.utc)
+    ninety_days_ago = today - timedelta(days=90)
 
-    def generate_credential_report(self):
-        """AWS se deep security data (MFA, Password Age, etc.) ki report mangwana"""
-        logger.info("📊 Generating AWS Credential Report...")
-        while True:
-            resp = self.iam.generate_credential_report()
-            if resp['State'] == 'COMPLETE':
-                break
-            time.sleep(2)
-        return self.iam.get_credential_report()['Content'].decode('utf-8')
+    # 1. Get All Users
+    users = iam.list_users()['Users']
 
-    def run_audit(self):
-        logger.info("🚀 Starting High-Level Security Intelligence Scan...")
-        csv_data = self.generate_credential_report()
-        reader = csv.DictReader(csv_data.splitlines())
+    for user in users:
+        username = user['UserName']
+        
+        # 2. Get User Details
+        password_last_used = "N/A"
+        try:
+            user_details = iam.get_user(UserName=username)
+            if 'PasswordLastUsed' in user_details['User']:
+                password_last_used = user_details['User']['PasswordLastUsed']
+        except:
+            pass
 
-        with open(self.report_path, 'w', newline='') as f:
-            # High-Level Columns
-            headers = [
-                'User', 'MFA_Active', 'Password_Last_Changed', 
-                'Password_Next_Rotation', 'Access_Key_1_Last_Used', 
-                'Risk_Level', 'Compliance_Score'
-            ]
-            writer = csv.DictWriter(f, fieldnames=headers)
-            writer.writeheader()
+        # 3. Check MFA
+        mfa_devices = iam.list_mfa_devices(UserName=username)['MFADevices']
+        mfa_active = len(mfa_devices) > 0
 
-            for row in reader:
-                if row['user'] == '<root_account>': continue
+        # 4. Check Access Keys
+        access_keys = iam.list_access_keys(UserName=username)['AccessKeyMetadata']
+        key_status = "No Keys"
+        key_last_used = "N/A"
+        if access_keys:
+            key_status = "Active" if access_keys[0]['Status'] == 'Active' else "Inactive"
+            # Get key last used info if available
+            key_id = access_keys[0]['AccessKeyId']
+            try:
+                key_last_used_info = iam.get_access_key_last_used(AccessKeyId=key_id)
+                if 'LastUsedDate' in key_last_used_info['AccessKeyLastUsed']:
+                    key_last_used = key_last_used_info['AccessKeyLastUsed']['LastUsedDate']
+            except:
+                pass
 
-                # Deep Analysis Logic
-                mfa = "SECURE" if row['mfa_active'] == 'true' else "CRITICAL_RISK"
-                
-                # Risk Calculation
-                risk = "LOW"
-                score = 100
-                if row['mfa_active'] == 'false':
-                    risk = "HIGH"
-                    score -= 50
-                if row['password_enabled'] == 'true' and row['password_last_changed'] == 'not_supported':
-                    risk = "CRITICAL"
-                    score -= 30
+        # 5. Check Policies (Permissions)
+        policies = iam.list_user_policies(UserName=username)['PolicyNames']
+        attached_policies = iam.list_attached_user_policies(UserName=username)['AttachedPolicies']
+        permissions = " | ".join(policies) + " | " + " | ".join([p['PolicyName'] for p in attached_policies])
 
-                writer.writerow({
-                    'User': row['user'],
-                    'MFA_Active': mfa,
-                    'Password_Last_Changed': row['password_last_changed'],
-                    'Password_Next_Rotation': row['password_next_rotation'],
-                    'Access_Key_1_Last_Used': row['access_key_1_last_used_date'],
-                    'Risk_Level': risk,
-                    'Compliance_Score': f"{score}%"
-                })
+        # 6. RISK LOGIC (Context Based)
+        risk_level = "LOW"
+        action_required = "None"
 
-        logger.info(f"✅ Enterprise Audit Complete. Report: {self.report_path}")
+        # Check for 90 days inactivity
+        is_inactive = False
+        if password_last_used != "N/A" and password_last_used < ninety_days_ago:
+            is_inactive = True
+        
+        if is_inactive:
+            risk_level = "CRITICAL"
+            action_required = "DELETE USER (Inactive > 90 Days)"
+        elif not mfa_active and password_last_used != "N/A":
+            risk_level = "HIGH"
+            action_required = "Enable MFA"
+        elif key_status == "Active" and key_last_used != "N/A" and key_last_used < ninety_days_ago:
+            risk_level = "HIGH"
+            action_required = "Rotate/Disable Keys"
+
+        report_data.append({
+            'User': username,
+            'MFA_Active': mfa_active,
+            'Password_Last_Used': password_last_used,
+            'Key_Status': key_status,
+            'Key_Last_Used': key_last_used,
+            'Permissions': permissions,
+            'Risk_Level': risk_level,
+            'Action_Required': action_required
+        })
+
+    # 7. Save to CSV
+    with open('reports/all_in_one_audit.csv', 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=['User', 'MFA_Active', 'Password_Last_Used', 'Key_Status', 'Key_Last_Used', 'Permissions', 'Risk_Level', 'Action_Required'])
+        writer.writeheader() # Corrected this line
+        writer.writerows(report_data)
+    
+    print("Report generated: reports/all_in_one_audit.csv")
 
 if __name__ == "__main__":
-    engine = EnterpriseIAMEngine()
-    engine.run_audit()
+    audit_users()

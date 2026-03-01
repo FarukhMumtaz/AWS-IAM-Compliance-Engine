@@ -1,0 +1,5 @@
+User,MFA_Active,Password_Last_Used,Key_Status,Key_Last_Used,Permissions,Risk_Level,Action_Required
+backup-service-bot,False,N/A,No Keys,N/A, | IAMReadOnlyAccess,LOW,None
+dev-test-no-mfa,False,2026-03-01 08:25:01+00:00,Active,N/A, | AIOpsReadOnlyAccess,HIGH,Enable MFA
+Farukh-Master-Admin,True,2026-03-01 08:19:01+00:00,Active,2026-03-01 09:04:00+00:00, | AdministratorAccess,LOW,None
+stale-intern-account,False,N/A,No Keys,N/A, | IAMReadOnlyAccess,LOW,None
