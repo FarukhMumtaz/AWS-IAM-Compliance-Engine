@@ -1,0 +1,5 @@
+User,MFA_Active,Password_Last_Changed,Password_Next_Rotation,Access_Key_1_Last_Used,Risk_Level,Compliance_Score
+backup-service-bot,CRITICAL_RISK,N/A,N/A,N/A,HIGH,50%
+dev-test-no-mfa,CRITICAL_RISK,2026-03-01T08:24:08Z,N/A,N/A,HIGH,50%
+Farukh-Master-Admin,SECURE,2026-03-01T08:07:55Z,N/A,N/A,LOW,100%
+stale-intern-account,CRITICAL_RISK,2026-03-01T08:27:31Z,N/A,N/A,HIGH,50%
